@@ -3,20 +3,23 @@ import mapboxgl from 'mapbox-gl';
 import axios from 'axios';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
-// Set the global token for the vanilla core library
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
 export default function App() {
-  const mapContainer = useRef(null); // Reference to HTML element
-  const map = useRef(null);          // Reference to underlying Mapbox instance
-  const markersRef = useRef([]);     // Array to track active map markers
+  const mapContainer = useRef(null);
+  const map = useRef(null);
+  const markersRef = useRef([]);
   
   const [sites, setSites] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // State tracking our dynamic range filter threshold
+  const [minMaturity, setMinMaturity] = useState(0);
 
-  // 1. Fetch data from FastAPI backend
+  // 1. Fetch data from FastAPI backend - dependent on minMaturity state
   useEffect(() => {
-    axios.get('http://127.0.0.1:8000/api/sites')
+    setLoading(true);
+    axios.get(`http://127.0.0.1:8000/api/sites?min_maturity=${minMaturity}`)
       .then((response) => {
         setSites(response.data);
         setLoading(false);
@@ -25,51 +28,44 @@ export default function App() {
         console.error("Error fetching data:", error);
         setLoading(false);
       });
-  }, []);
+  }, [minMaturity]); // Triggers database query whenever slider updates!
 
-  // 2. Initialize the physical Mapbox map canvas once
+  // 2. Initialize the physical Mapbox canvas once
   useEffect(() => {
-    if (map.current) return; // Prevent double rendering in development
+    if (map.current) return;
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/light-v11',
-      center: [33.7, -13.5], // Coordinates over Central Africa/Malawi
+      center: [33.7, -13.5],
       zoom: 6.5
     });
 
-    // Add zoom and rotation controls to the map UI
     map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
   }, []);
 
   // 3. Programmatically paint markers when 'sites' data updates
   useEffect(() => {
-    if (!map.current || sites.length === 0) return;
+    if (!map.current) return;
 
-    // Clear existing markers from memory if data re-fetches
+    // Wipe stale markers from the map layout cleanly on state shifts
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
 
     sites.forEach((site) => {
-      // Outer wrapper element - purely for Mapbox to anchor positions securely
       const el = document.createElement('div');
       el.className = 'cursor-pointer'; 
 
-      // INNER child element - handles all styling and hover scale animations safely
       const inner = document.createElement('div');
       inner.className = 'w-6 h-6 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white text-xs font-bold transition-transform duration-200 hover:scale-125';
       
-      // Color coding logic applied to the inner element
       if (site.maturity_score > 70) inner.classList.add('bg-green-500');
       else if (site.maturity_score > 40) inner.classList.add('bg-yellow-500');
       else inner.classList.add('bg-red-500');
 
       inner.innerHTML = '•';
-      
-      // Nest the stylized pin inside the stable coordinate element
       el.appendChild(inner);
 
-      // Design the popup card markup template
       const popupHTML = `
         <div class="p-2 text-slate-800 font-sans">
           <h3 class="font-bold text-base border-b pb-1 mb-2">${site.name}</h3>
@@ -87,18 +83,14 @@ export default function App() {
         </div>
       `;
 
-      // Build out the dynamic popup configuration block
       const popup = new mapboxgl.Popup({ 
         offset: 15,
         closeButton: true,
         closeOnClick: true 
       }).setHTML(popupHTML);
 
-      // Attach listener directly to the outer container element
       el.addEventListener('click', (e) => {
-        // Prevent click events from reaching the map and triggering close methods
         e.stopPropagation();
-        
         if (popup.isOpen()) {
           popup.remove();
         } else {
@@ -106,31 +98,65 @@ export default function App() {
         }
       });
 
-      // Create the native marker utilizing the nested HTML blueprint
       const marker = new mapboxgl.Marker(el)
         .setLngLat([site.longitude, site.latitude])
         .addTo(map.current);
 
-      // Cache the marker reference for future cleanups
       markersRef.current.push(marker);
     });
   }, [sites]);
 
   return (
-    <div className="flex h-screen flex-col font-sans">
+    <div className="flex h-screen flex-col font-sans text-slate-800">
       {/* Top Banner Navigation */}
-      <header className="bg-slate-900 px-6 py-4 text-white shadow-md z-10">
-        <h1 className="text-2xl font-bold tracking-wide">GeoNode Research Architecture</h1>
-        <p className="text-sm text-slate-400">Site Feasibility & Digital Maturity Explorer</p>
+      <header className="bg-slate-900 px-6 py-4 text-white shadow-md z-10 flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold tracking-wide">GeoNode Research Architecture</h1>
+          <p className="text-sm text-slate-400">Site Feasibility & Digital Maturity Explorer</p>
+        </div>
+        <div className="bg-slate-800 px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-300">
+          Active Sites: <span className="font-bold text-green-400">{sites.length}</span>
+        </div>
       </header>
 
-      {/* Map Target Canvas Wrapper */}
+      {/* Map Content Wrapper */}
       <div className="flex-grow relative w-full h-full">
+        {/* Floating Interactive Filter Dashboard Component Overlay */}
+        <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur p-6 rounded-xl shadow-xl border border-slate-200/80 w-80">
+          <h2 className="font-bold text-lg text-slate-900 mb-1">Feasibility Controls</h2>
+          <p className="text-xs text-slate-500 mb-4">Query criteria passed directly to PostGIS engine</p>
+          
+          <div className="space-y-2">
+            <div className="flex justify-between items-center text-sm">
+              <label className="font-semibold text-slate-700">Min Digital Maturity</label>
+              <span className="bg-blue-50 text-blue-600 font-bold px-2 py-0.5 rounded text-xs border border-blue-100">
+                {minMaturity} / 100
+              </span>
+            </div>
+            <input 
+              type="range" 
+              min="0" 
+              max="100" 
+              value={minMaturity}
+              onChange={(e) => setMinMaturity(Number(e.target.value))}
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 focus:outline-none"
+            />
+            <div className="flex justify-between text-[10px] text-slate-400 font-medium px-0.5">
+              <span>0 (All Sites)</span>
+              <span>50</span>
+              <span>100</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Loading Overlay Spinner feedback */}
         {loading && (
-          <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center text-lg font-semibold text-slate-700">
-            Streaming Clinical Coordinates...
+          <div className="absolute top-4 right-16 z-10 bg-slate-900 text-white text-xs px-3 py-1.5 rounded-full shadow-lg font-medium tracking-wide flex items-center gap-2 animate-pulse">
+            <div className="w-2 h-2 rounded-full bg-green-400"></div>
+            Syncing PostGIS filters...
           </div>
         )}
+        
         <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
       </div>
     </div>

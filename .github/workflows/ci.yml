@@ -1,0 +1,82 @@
+name: Continuous Integration Loop
+
+# Trigger the pipeline on any push or pull request to the main branch
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # JOB 1: Validate the FastAPI Python backend
+  backend-validation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python Runtime
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Cache Python Packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        # Install libpq-dev so the psycopg2 PostgreSQL driver compiles cleanly in GitHub
+        sudo apt-get install -y libpq-dev gcc
+
+    - name: Install Application Requirements
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Syntax and Compilation Check
+      run: |
+        # Python compilation check ensures no broken imports or unparseable files
+        python -m compileall app/
+
+  # JOB 2: Validate the React + Vite frontend
+  frontend-validation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js Runtime
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Cache Node Modules
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: Install Node Dependencies
+      run: npm ci
+
+    - name: Execute Production Build Test
+      run: |
+        # Force Vite to compile the asset tree. 
+        # We pass a mock token variable so the build doesn't fail due to missing env tokens.
+        VITE_MAPBOX_TOKEN=mock_token_for_ci_compilation npm run build

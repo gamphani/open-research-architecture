@@ -29,21 +29,26 @@ def health_check():
 
 
 @app.get("/api/sites", response_model=List[schemas.ClinicalSiteResponse], tags=["Feasibility"])
-def get_all_clinical_sites(db: Session = Depends(get_db)):
+def get_all_clinical_sites(min_maturity: int = 0, db: Session = Depends(get_db)):
     """
-    Fetches all clinical sites, extracting raw longitude and latitude 
-    natively from the PostGIS spatial point geometry.
+    Fetches clinical sites, extracting coordinates from PostGIS, with 
+    an optional server-side digital maturity score filtration.
     """
-    # Use PostGIS ST_X and ST_Y to extract coordinates from the geometry column
-    query_results = db.query(
+    # 1. Initialize the baseline geospatial select query
+    query = db.query(
         models.ClinicalSite,
         functions.ST_X(models.ClinicalSite.location).label("lon"),
         functions.ST_Y(models.ClinicalSite.location).label("lat")
-    ).all()
+    )
+
+    # 2. Conditionally apply SQL filtering clauses based on query params
+    if min_maturity > 0:
+        query = query.filter(models.ClinicalSite.maturity_score >= min_maturity)
+
+    query_results = query.all()
 
     response_data = []
     for site, lon, lat in query_results:
-        # Construct the response matching our Pydantic schema structure
         site_dict = site.__dict__
         site_dict["longitude"] = lon
         site_dict["latitude"] = lat
