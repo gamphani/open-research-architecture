@@ -3,7 +3,7 @@ from uuid import UUID
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-# Base Schema for shared attributes
+# 1. Base Schema for shared attributes
 class ClinicalSiteBase(BaseModel):
     name: str
     facility_type: Optional[str] = None
@@ -14,7 +14,7 @@ class ClinicalSiteBase(BaseModel):
     supports_fhir: bool = False
     has_reliable_internet: bool = False
 
-# Schema used when returning data via the API
+# 2. Schema used when returning site data via the API
 class ClinicalSiteResponse(ClinicalSiteBase):
     site_id: UUID
     latitude: float
@@ -22,11 +22,9 @@ class ClinicalSiteResponse(ClinicalSiteBase):
     last_updated: datetime
 
     class Config:
-        # Tells Pydantic to read data even if it's an ORM object, not a dict
         from_attributes = True
 
-
-# Schema for regional demographic data responses
+# 3. Schema for regional demographic data responses
 class DemographicRegionResponse(BaseModel):
     region_id: UUID
     region_name: str
@@ -36,3 +34,13 @@ class DemographicRegionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# 4. New Schema for the NLP Protocol Parsing Response
+class ProtocolParseResponse(BaseModel):
+    filename: str
+    detected_indication: str
+    target_sample_size: Optional[int] = None
+    min_age: Optional[int] = None
+    requires_emr: bool = False
+    requires_fhir: bool = False
+    suggested_health_zones: list[str] = []

@@ -1,0 +1,1 @@
+This phase III clinical trial target indication is HIV. We are enrolling a sample size of 650 participants. Inclusion criteria: adults aged 18 years or older. All clinical sites must run an active EMR model matching FHIR interoperability layers.

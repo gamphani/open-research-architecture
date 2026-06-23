@@ -4,6 +4,10 @@ from sqlalchemy.orm import Session
 from geoalchemy2 import functions
 from typing import List
 
+from fastapi import UploadFile, File
+from .utils.nlp_parser import extract_protocol_metadata
+
+
 from .database import get_db
 from . import models, schemas
 
@@ -55,3 +59,66 @@ def get_all_clinical_sites(min_maturity: int = 0, db: Session = Depends(get_db))
         response_data.append(site_dict)
 
     return response_data
+
+import json
+
+@app.get("/api/zones", tags=["Feasibility"])
+def get_health_zones(db: Session = Depends(get_db)):
+    """
+    Fetches all administrative health zones, converting PostGIS geometry 
+    into a standardized GeoJSON FeatureCollection for the frontend map.
+    """
+    # Use ST_AsGeoJSON to let PostgreSQL handle the coordinate string conversion
+    results = db.query(
+        models.DemographicRegion.region_id,
+        models.DemographicRegion.region_name,
+        models.DemographicRegion.population_metrics,
+        models.DemographicRegion.disease_incidence,
+        functions.ST_AsGeoJSON(models.DemographicRegion.boundary).label("geojson")
+    ).all()
+
+    features = []
+    for rid, name, metrics, incidence, geojson_str in results:
+        feature = {
+            "type": "Feature",
+            "geometry": json.loads(geojson_str),
+            "properties": {
+                "zone_id": str(rid),
+                "zone_name": name,
+                "districts": metrics.get("districts", []),
+                "hiv_rate": incidence.get("hiv", 0),
+                "hypertension_rate": incidence.get("hypertension", 0)
+            }
+        }
+        features.append(feature)
+
+    return {
+        "type": "FeatureCollection",
+        "features": features
+    }
+
+@app.post("/api/protocols/parse", response_model=schemas.ProtocolParseResponse, tags=["NLP Engine"])
+async def parse_clinical_protocol(file: UploadFile = File(...)):
+    """
+    Accepts raw clinical protocol files (.txt, .md), extracts structured insights 
+    via rule-based semantic NLP filters, and map metrics to regional database profiles.
+    """
+    # Restrict processing to basic unstructured files for the initial iteration
+    if not file.filename.endswith(('.txt', '.md')):
+        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a .txt or .md file.")
+
+    try:
+        # Asynchronously read the raw uploaded bytes and decode into textual strings
+        contents = await file.read()
+        protocol_text = contents.decode("utf-8")
+        
+        # Invoke our NLP parser module
+        parsed_metadata = extract_protocol_metadata(protocol_text)
+        
+        # Merge structural document tags and return the validated response model
+        return {
+            "filename": file.filename,
+            **parsed_metadata
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal NLP Engine Exception: {str(e)}")
